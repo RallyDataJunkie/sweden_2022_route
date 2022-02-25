@@ -1,0 +1,20 @@
+
+
+```{python, results='hide'}
+import pandas as pd
+
+pd_df = r.overall_reporter_view
+#pd_df = r.top10_stage_times
+
+#pd_df  = pd.melt(pd_df, id_vars=['code'], value_vars=[r.last_stage_code],
+#                 var_name='stage', value_name='gap')
+#pd_df['position'] = pd_df['gap'].rank()
+#pd_df['diff'] = pd_df['overall_gap'].diff()
+pd_df.dropna(how='any', subset=['overall_pos', 'stage_position', 'overall_gap'], inplace=True)
+# Generates cols: code, stage, gap
+txts=[]
+overall_txts = {}
+
+pd_df.head().apply(rulesbyrow, ruleset='rule_multi_overall', axis=1)
+txt_out = '\n\n'.join(txts)
+```

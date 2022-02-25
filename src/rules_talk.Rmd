@@ -1,0 +1,201 @@
+# NLG test
+
+**This is just a scratch script; code is also broken out into rules_processor.py and rules_overall.py and used in context of rule_template_overall.Rmd*
+
+```{r}
+library(reticulate)
+#use_python("/usr/local/bin/python3")
+
+library(knitr)
+
+source('_code/wrc-api.R')
+source('_code/wrc-wrangling.R')
+```
+
+
+
+
+```{r}
+
+map_stage_codes_col = function(df, stages){
+  df %>%
+    merge(stages %>% rename(stagecode = code) %>% select(c(stageId,stagecode)),
+          by='stageId')  %>%
+    # Limit columns and set column order
+    #select(-'stageId') %>%
+    # Move last column to first
+    select('stagecode', everything())
+}
+rule_multi_results = multi_overall_results %>% map_driver_names(cars) %>% map_stage_codes_col(stages) %>% arrange(stagecode, position)
+
+rule_multi_results
+```
+```{python}
+pd_df = r.rule_multi_results
+pd_df.head()
+```
+
+```{python}
+from durable.lang import *
+import pandas as pd
+import inflect
+
+p = inflect.engine()
+```
+
+
+```{python}
+import random
+
+def sometimes(t, p=0.5):
+    """Sometimes return a string passed to the function."""
+    if random.random()>=p:
+        return t
+    return ''
+
+def occasionally(t):
+    """Sometimes return a string passed to the function."""
+    return sometimes(t, p=0.2)
+
+def rarely(t):
+    """Rarely return a string passed to the function."""
+    return sometimes(t, p=0.05)
+
+def pickone_equally(l, prefix='', suffix=''):
+    """Return an item from a list,
+       selected at random with equal probability."""
+    t = random.choice(l)
+    if t:
+        return f'{prefix}{t}{suffix}'
+    return suffix
+
+def pickfirst_prob(l, p=0.5):
+    """Select the first item in a list with the specified probability,
+       else select an item, with equal probability, from the rest of the list."""
+    if len(l)>1 and random.random() >= p:
+        return random.choice(l[1:])
+    return l[0]
+```
+
+```{python}
+import json
+
+def rulesbyrow(row, ruleset):
+    row = json.loads(json.dumps(row.to_dict()))
+    post(ruleset,row)
+
+def df_json(df):
+    """Convert rows in a pandas dataframe to a JSON string.
+       Cast the JSON string back to a list of dicts 
+       that are palatable to the rules engine. 
+    """
+    return json.loads(df.to_json(orient='records'))
+  
+def factsbyrow(row, ruleset):
+    row = json.loads(json.dumps(row.to_dict()))
+    assert_fact(ruleset,row)
+```
+
+```{python}
+from durable.lang import *
+from durable.lang import _main_host
+
+txts = []
+
+if _main_host is not None:
+    _main_host._ruleset_directory.clear()
+
+with ruleset('rule_multi_results'):
+    
+    #Display something about the crew in first place
+    @when_all(m.position < 2)
+    def whos_in_first(c):
+        """Generate a sentence to report on the first placed vehicle."""
+        #We can add additional state, accessible from other rules
+        #In this case, record the Crew and Brand for the first placed crew
+        c.s.first_code = code
+        
+        #Python f-strings make it easy to generate text sentences that include data elements
+        txts.append(f'{c.m.code} was in first with a time of .')
+    
+    #This just checks whether we get multiple rule fires...
+    @when_all(m.position == 1)
+    def whos_in_first2(c):
+        txts.append('we got another first...')
+        
+    #We can be a bit more creative in the other results
+    @when_all(m.position>1)
+    def whos_where(c):
+        """Generate a sentence to describe the position of each other placed vehicle."""
+        
+        #Use the inflect package to natural language textify position numbers...
+        nth = p.number_to_words(p.ordinal(int(c.m.position)))
+        
+        #Use various probabalistic text generators to make a comment for each other result
+        first_opts = [c.s.first_code, 'the stage winner']
+        #if c.m.Brand==c.s.first_brand:
+        #    first_opts.append(f'the first placed {c.m.Brand}')
+        t = pickone_equally([f'with a time of {c.m.totalTime}',
+                             "{} behind {}".format(str(c.m.diffFirstS), pickone_equally(first_opts))],
+                           prefix=', ')
+        
+        #And add even more variation possibilities into the returned generated sentence
+        txts.append(f'{c.m.code} was in {nth}{sometimes(" position")}{t}.')
+
+
+
+```
+
+
+```{python}
+txts=[]
+pd_df.head().apply(rulesbyrow, ruleset='rule_multi_results', axis=1)
+
+print('\n\n'.join(txts))
+```
+
+
+```{python}
+txts=[]
+pd_df.head().apply(rulesbyrow, ruleset='rule_multi_results', axis=1)
+
+print('\n\n'.join(txts))
+```
+
+
+```{python}
+txts=[]
+
+post_batch('rule_multi_results', df_json(pd_df.head()))
+print('\n\n'.join(txts))
+```
+
+```{python}
+txts=[]
+pd_df.head(20).apply(factsbyrow, ruleset='rule_multi_results')
+'\n\n'.join(txts)
+```
+
+```{python}
+tmpq = pd.DataFrame({'Year':	[2020], 'Stage':	[3], 'Type':	['general'], 'Pos':	[1], 'Bib':	[9], 'VehicleType':	['moto'], 'Crew':	['R. BRABEC MONSTER ENERGY HONDA TEAM 2020'], 'Brand':	['HONDA'], 'Time_raw':	['10:39:04'], 'TimeInS':	[38344], 'Gap_raw':	['0:00:00'], 'GapInS':	[0.0], 'Penalty_raw':	['00:00:00'], 'PenaltyInS':	[0.0]})
+
+tmpq						 					
+```
+
+```{python}
+#This handles numpy types that ruleset json serialiser doesn't like
+tmp = json.loads(tmpq.iloc[0].to_json())
+tmp
+```
+
+```{python}
+txts = []
+
+post('test1',tmp)
+print(''.join(txts))
+```
+
+```{r}
+py$txts
+```
+

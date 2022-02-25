@@ -1,0 +1,231 @@
+```{r}
+cat(paste("Enter stage_result_template", stage_code),
+    file=logFile, sep='\n')
+```
+# `r stage_code` Results
+
+```{r}
+top10_display_cols_base = c('position', 'identifier', 'code',
+                            #'drivername', 'codrivername',
+                            #'groupname', 'entrantname',
+                            #'classname', 'eligibility',
+                            #'elapsedDuration',
+                            # gap is the time delta between a driver
+                            # and the leader; diff (or interval)
+                            # is the difference between a driver
+                            # and the driver immediately ahead
+                            'TimeInS', 'gap', 'diff')
+```
+
+```{r top10-stage-times-{{result_group}}-{{stage_code}}, cache=TRUE}
+top10_stage_times = stage_times %>%
+                      # Filter required group
+                      #filter(entryId %in% wrc_entries) %>%
+                      # A minor optimisation step to 
+                      # limit the amount of merging
+                      arrange(position) %>%
+                      filter(entryId %in% wrc_entries) %>%
+                      head(10) %>%
+                      # Merge in the entries data
+                      merge(cars, by='entryId')  %>%
+                      # Convert milliseconds to seconds
+                      mutate(TimeInS = elapsedDurationMs/1000,
+                             gap = diffFirstMs/1000,
+                             diff = diffPrevMs/1000)  %>%
+                      # Limit columns and set column order
+                      select(all_of(top10_display_cols_base),
+                             'entryId') %>%
+                      # The merge may upset the row order
+                      # so reset the order again
+                      arrange(position)
+
+# Optionally, re-rank by group
+if (use_group_rank) {
+  top10_stage_times$overall_stage_pos = top10_stage_times$position
+  top10_stage_times$position = rank(top10_stage_times$overall_stage_pos)
+}
+```
+
+
+```{r top10-stage-times-table-{{result_group}}-{{stage_code}}, cache=TRUE}
+stage_cols = c('stageId', 'number', 'name', 'distance', 'code')
+
+stage_info = stages %>%
+                select(all_of(stage_cols)) %>%
+                # Tidy up the stage name
+                mutate(name = str_replace(name, ' \\(Live TV\\)', ''))
+
+#large_diff = 2
+
+caption = paste0('Top 10, ', stage_info_$code,
+                 ', ', stage_info_$name, ' (',
+                 stage_info_$distance, 'km)')
+
+top10_stage_times_out = top10_stage_times %>%
+                      # TO DO  - arrange using na.last=TRUE ?
+                      # Improve column names by renaming them
+                      rename(Pos=position,
+                             Car = identifier,
+                             Code = code,
+                             `Time (s)` = TimeInS,
+                             Gap = gap, Diff = diff)
+
+top10_stage_times_out %>% 
+  filter(!is.na(Gap)) %>%
+  select(-overall_stage_pos) %>%
+  formattable(list(Gap = color_bar2("#FA614B66"),
+                   Diff = color_tile("#DeF7E9","#71CA97"),
+                   entryId=FALSE), caption=caption)
+```
+
+
+```{r}
+#py$pd_df
+```
+
+```{r group-stage-times-{{result_group}}-{{stage_code}}, cache=TRUE}
+group_stage_times = stage_times %>%
+                      # Filter required group
+                      filter(entryId %in% wrc_entries) %>%
+                      # A minor optimisation step to 
+                      # limit the amount of merging
+                      arrange(position) %>%
+                      #head(10) %>%
+                      # Merge in the entries data
+                      merge(cars, by='entryId')  %>%
+                      # Convert milliseconds to seconds
+                      mutate(TimeInS = elapsedDurationMs/1000,
+                             gap = diffFirstMs/1000,
+                             diff = diffPrevMs/1000)  %>%
+                      # Limit columns and set column order
+                      select(all_of(top10_display_cols_base),
+                             'entryId') %>%
+                      # The merge may upset the row order
+                      # so reset the order again
+                      arrange(position) %>%
+                      # Improve column names by renaming them
+                      rename(Pos=position,
+                             Car = identifier,
+                             Code = code,
+                             `Time (s)` = TimeInS,
+                             Gap = gap, Diff = diff)
+```
+
+```{r test-stage-splits-{{stage_code}}, message=FALSE, echo=FALSE, error=FALSE, warning=FALSE, results='asis'}
+#omit_stage_splits=c("SS1")
+
+# Handle stages without a split
+stage_splits_exist = length(get_splits(eventId, stageId)$splitPoints)
+
+if (!(stage_code %in% c()) && stage_splits_exist){ #omit_stage_splits)) {
+    template="test-template.Rmd"
+    #template="empty_template.Rmd"
+    src = knit_expand(template)
+    cat(knit_child(text=src,
+                 options = list(echo=FALSE, warning=FALSE, error=FALSE),
+                 quiet=TRUE))
+}
+
+```
+
+
+## Text report
+
+
+```{r}
+# multi_overall_lead_previous_long comes from overall-template.Rmd
+stage_reporter_view = multi_overall_lead_previous_long %>% 
+         filter(stage==!!stage_code)  %>%
+         merge(multi_overall_wide_gap_top10_view %>% 
+                select(code, !!stage_code) %>%
+                rename(gap=!!stage_code), by='code')  %>%
+         merge(multi_stage_wide_pos %>% 
+                select(code, !!stage_code) %>%
+                rename(stage_position=!!stage_code), by='code')  %>%
+         merge(multi_stage_win_truth %>% 
+                select(code, !!stage_code) %>%
+                rename(stage_win=!!stage_code), by='code') %>% 
+         rename(overall_pos=position,
+                overall_gap=gap) %>%
+         merge(top10_stage_times, by='code') %>%
+         dplyr::arrange(overall_pos) %>% 
+         mutate(overall_diff=overall_gap-lag(overall_gap),
+                overall_chase=lead(overall_gap)-overall_gap) %>%
+         dplyr::arrange(position) %>%
+         mutate(chase=lead(gap)-gap,
+                chase_code=lead(code), lead_code=lag(code)) %>%
+         select(code, identifier, entryId, 	stage,	overall_pos,	prev_position, retained_lead,	lost_lead,	gained_lead,	overall_position_delta,	 overall_chase_code, overall_lead_code, overall_gap, overall_diff,	overall_chase, overall_stage_pos,	stage_position,	stage_win,	position,	TimeInS,	gap,	diff,	chase, chase_code, lead_code)
+
+kable(stage_reporter_view, format = "html") %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+
+
+```{r message=FALSE, results='hide'}
+py_run_file("rules_stage.py")
+src = knit_expand("rule_template_stage.Rmd")
+knit_child(text=src,
+               options = list(echo=FALSE,results='hide', warning=FALSE, error=FALSE),
+               quiet=TRUE)
+```
+
+```{r}
+#top10_stage_times
+```
+
+__Stage report for `r stage_code`:__
+
+```{r results="asis"}
+cat(py$txt_out)
+```
+
+```{r}
+#py$stage_txts#[[driverCode]]
+```
+
+```{r message=FALSE, echo=FALSE, error=FALSE, warning=FALSE, results='asis'}
+# Handle rebase split times for each driver
+
+if (stage_splits_exist) {
+  
+  rebase_cols = c('Time (s)', 'Gap')
+
+  for (driverEntryId in wrc_entries){
+    #driverEntryId=22431
+    driverCode = cars[cars$entryId==driverEntryId, 'code']
+    
+    # Remove accents for use in chunk labels/image names
+    driverCodeClean = stringi::stri_trans_general(driverCode, "Latin-ASCII")
+    
+    template = "driver_stage_template.Rmd"
+    #template="empty_template.Rmd"
+    src = knit_expand(template)
+    cat(knit_child(text=src,
+                     options = list(echo=FALSE, warning=FALSE, error=FALSE),
+                     quiet=TRUE))
+    
+
+    
+    # driver_blank set in driver_stage_template.Rmd
+    if (!(stage_code %in% c()) && !(driver_blank)){ #omit_stage_splits)) {
+      template="driver_template.Rmd"
+      #template="empty_template.Rmd"
+      src = knit_expand(template)
+      cat(knit_child(text=src,
+                     options = list(echo=FALSE, warning=FALSE, error=FALSE),
+                     quiet=TRUE))
+    }
+  }
+  
+}
+
+
+
+```
+
+```{r}
+cat(paste("Leave stage_result_template", stage_code),
+    file=logFile, sep='\n')
+```
+

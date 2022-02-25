@@ -1,0 +1,119 @@
+# WRC Results Grabber
+
+```{r}
+source('_code/wrc-api.R')
+
+# Use the event ID grabbed from the season table as the event key column in all tables
+
+save_data = function(df, fn, eventkey, dirpath = "results_data/") {
+  if (!dir.exists(dirpath))
+      dir.create(dirpath, recursive=TRUE)
+
+  if(!is_null(eventkey))
+    df = df %>% mutate(eventkey=eventkey) %>%
+          select(eventkey, everything())
+
+  write.csv(df, file.path(dirpath, fn), row.names = FALSE)
+}
+
+```
+
+```{r}
+season = get_active_season() %>% select(-eventDays) %>%
+          mutate(eventkey=id) %>% select(eventkey, everything())
+save_data(season, "season.csv", NULL)
+
+season
+```
+
+```{bash}
+sqlite-utils insert --replace test.db season --csv results_data/season.csv --pk=eventkey
+```
+
+```{r}
+eventId = get_eventId_from_name(season, 'sweden')
+```
+
+```{r}
+itinerary = get_itinerary(eventId)
+sections = get_sections(itinerary)
+controls = get_controls(sections)
+
+stages = get_stages(sections) #status and code are useful...
+
+# For driver details
+entries = get_rally_entries(eventId)
+cars = get_car_data(entries)
+
+
+stage_cols = c('stageId', 'number', 'name', 'distance', 'code')
+stage_info = stages %>%
+                select(all_of(stage_cols)) %>%
+                # Tidy up the stage name
+                mutate(name = str_replace(name, ' \\(Live TV\\)', ''))
+```
+
+```{r}
+save_data(cars, "cars.csv", eventId)
+save_data(controls, "controls.csv", eventId)
+save_data(entries %>% select(-eventClasses, -tags), "entries.csv", eventId)
+save_data(stage_info, "stage_info.csv", eventId)
+save_data(stages, "stages.csv", eventId)
+```
+
+
+```{bash}
+
+sqlite-utils insert --replace test.db cars --csv results_data/cars.csv --pk=eventkey,entryId
+
+sqlite-utils insert --replace test.db controls --csv results_data/controls.csv --pk=eventkey,controlId,stageId
+
+sqlite-utils insert --replace test.db entries --csv results_data/entries.csv --pk=eventkey,entryId
+
+sqlite-utils insert --replace test.db stage_info --csv results_data/stage_info.csv --pk=eventkey,stageId
+
+sqlite-utils insert --replace test.db stages --csv results_data/stages.csv --pk=eventkey,stageId
+```
+
+```{r}
+# Overall results
+#stage_codes =  unlist(stage_list)
+#stage_list_codes = stages[stages$code %in% stage_codes, 'stageId']
+stage_list_codes = stage_info$stageId
+
+multi_overall_results = get_multi_overall(stage_list_codes) %>%
+                            mutate(diffFirstS = diffFirstMs/1000,
+                                   totalTimeS = totalTimeMs/1000)
+
+multi_stage_times = get_multi_stage_times(stage_list_codes)
+
+save_data(multi_overall_results, "multi_overall_results.csv", eventId)
+save_data(multi_stage_times, "multi_stage_times.csv", eventId)
+
+```
+
+```{bash}
+
+sqlite-utils insert --replace test.db multi_stage_times --csv results_data/multi_stage_times.csv --pk=eventkey,stageId,entryId
+
+sqlite-utils insert --replace test.db multi_overall_results --csv results_data/multi_overall_results.csv --pk=eventkey,stageId,entryId
+```
+
+```{r}
+# Stage results / splits
+
+# This is suboptimal - we actually pull all the splits data twice
+full_splits_wide = get_multi_split_times(stage_list_codes)
+full_splits_locations = get_multi_split_locations(stage_list_codes)
+
+save_data(full_splits_wide, "full_splits_wide.csv", eventId)
+
+save_data(full_splits_locations,"split_distances.csv", eventId)
+```
+
+```{bash}
+
+sqlite-utils insert --replace test.db full_splits_locations --csv results_data/split_distances.csv --pk=eventkey,splitPointId,entryId
+
+sqlite-utils insert --replace test.db full_splits_wide --csv results_data/full_splits_wide.csv --pk=eventkey,splitPointId,entryId
+```

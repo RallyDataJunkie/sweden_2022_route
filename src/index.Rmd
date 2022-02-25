@@ -1,0 +1,56 @@
+---
+title: "`r params$doc_title`"
+subtitle: "A RallyDataJunkie Adventure"
+author: "Tony Hirst"
+description: "Stage results,  WRC Rally Sweden  2022"
+knit: "bookdown::render_book"
+site: bookdown::bookdown_site
+date: "Last generated on `r format(Sys.time(), '%d %B, %Y')`"
+always_allow_html: yes
+new_session: no
+params:
+  doc_title: "Stage Results"
+---
+
+```{r warning=FALSE, include=FALSE, echo=FALSE, message=FALSE, output=FALSE}
+library(knitr)
+library(kableExtra)
+library(formattable)
+
+source('_code/wrc-api.R')
+
+# Naming chunks: use - not . or _
+# https://github.com/rstudio/distill/issues/46#issuecomment-580355990
+```
+
+```{r}
+s = get_active_season()
+eventId = get_eventId_from_name(s, 'sweden')
+
+rally_name = paste0(s[s$id==eventId,'name'], ", 2022")
+```
+
+# Preface {-}
+
+Automatically generated stage timing and results for stages on *`r rally_name`*.
+
+Based on analysis of timing and results data downloaded from the WRC website.
+
+To discuss / critique / comment on these analyses, please use the [discussion forum](http://discussions.rallydatajunkie.com/).
+
+For a guide to the code used to generate the stage reports, see [*Visualising WRC Rally Results*](https://rallydatajunkie.com/visualising-wrc-rally-results).
+
+See also [*Visualising WRC Rally Stages*](https://rallydatajunkie.com/visualising-rally-stages/).
+
+*This report is unofficial and is not associated in any way with the Fédération Internationale de l’Automobile (FIA) or WRC Promoter GmbH.*
+
+## Who This Review Is For {-}
+
+The [RallyDataJunkie project](https://rallydatajunkie.com), such as it is, is a personal exploration of various ways of representing and visualising rally related stage, timing and results data.
+
+There are several potential audiences:
+
+- rally fans, looking for summaries of rally events;
+- teams and crews, looking for variously arranged summaries to check and compare performances;
+- commentators and journalists, looking for variously arranged summaries and overviews as a tool for confirming or identifying storypoints;
+- data folk, looking for various ways of representing various route, timing or results data.

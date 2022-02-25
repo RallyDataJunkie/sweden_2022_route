@@ -1,0 +1,692 @@
+```{r warning=FALSE, include=FALSE, echo=FALSE, message=FALSE}
+library(sparkline)
+library(kableExtra)
+source('overall_sketches.R')
+source('spark_sketches.R')
+```
+
+```{r}
+stage_codes =  unlist(stage_list)
+stage_list_codes = stages[stages$code %in% stage_codes, 'stageId']
+```
+
+```{r overall_wide_gap, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# TO DO - reorder the order of display of tables
+
+# TO DO  - gap to leader at end of stage
+
+
+# TO DO - we need to make sure we are working with the same cars
+# For example, WRC cars (cars in group), top 10 overall etc
+# The top 10 by stage may not be the same as top 10 overall
+
+
+multi_overall_results = get_multi_overall(stage_list_codes) %>%
+                            mutate(diffFirstS = diffFirstMs/1000,
+                                   totalTimeS = totalTimeMs/1000) %>%
+                          filter(entryId %in% wrc_entries) 
+
+# Optionally, re-rank by group by stage
+if (use_group_rank) {
+  #multi_overall_results$overall_position = multi_overall_results$position
+  multi_overall_results = multi_overall_results %>%
+                            group_by(stageId) %>%
+                            mutate(overall_position = position,
+                                   position = rank(position))
+}
+
+multi_overall_wide_pos = multi_overall_results %>%
+                            get_multi_stage_generic_wide(stage_list_codes,
+                                                         'position') %>%
+              dplyr::arrange(!!as.symbol(stage_list_codes[length(stage_list_codes)]))
+
+
+multi_overall_wide_time = multi_overall_results %>%
+                              get_multi_stage_generic_wide(stage_list_codes,
+                                                           'totalTimeS') %>%
+              dplyr::arrange(!!as.symbol(stage_list_codes[length(stage_list_codes)]))
+
+# TO DO - we need to be able to use the gap to group leader not overall
+# Maybe have a re-rebase?
+multi_overall_wide_gap = multi_overall_results %>%
+                            get_multi_stage_generic_wide(stage_list_codes,
+                                                         'diffFirstS') %>%
+              dplyr::arrange(!!as.symbol(stage_list_codes[length(stage_list_codes)]))
+
+if (use_group_rank) {
+  group_rebase_id = multi_overall_wide_gap$entryId[1]
+  multi_overall_wide_gap = multi_overall_wide_gap %>%
+                            rebase(group_rebase_id, stage_list_codes)
+}
+
+# Based around entryId: 
+# multi_overall_wide_pos, multi_overall_wide_time, multi_overall_wide_gap
+```
+
+
+```{r overall_multi_stage, warning=FALSE, include=FALSE, echo=FALSE, message=FALSE}
+# TO DO - need to have a function that does WRC/class not overall top10
+clean_top10 = function(df) {
+  df %>% relabel_times_df(stage_list_codes, cars) %>%
+          dplyr::arrange(!!as.symbol(stage_codes[length(stage_codes)])) %>%
+          head(20)
+}          
+
+multi_stage_times = get_multi_stage_times(stage_list_codes)  %>%
+                          filter(entryId %in% wrc_entries)
+
+
+# Optionally, re-rank by group
+if (use_group_rank) {
+  multi_stage_times = multi_stage_times %>%
+                            group_by(stageId) %>%
+                            mutate(overall_position = position,
+                                   position = rank(position))
+}
+
+# We need to add entryId back in here
+multi_stage_times_wide = multi_stage_times %>%
+                            get_multi_stage_times_wide(stage_list_codes) %>%
+                    dplyr::arrange(!!as.symbol(stage_list_codes[length(stage_list_codes)]), na.last=TRUE) %>%
+clean_top10()
+
+multi_stage_wide_pos = multi_stage_times %>%
+                              get_multi_stage_generic_wide(stage_list_codes,
+                                                         'position')  %>%
+                dplyr::arrange(!!as.symbol(stage_list_codes[length(stage_list_codes)]), na.last=TRUE) %>%
+                            clean_top10()
+```
+
+
+
+```{r }
+# TO DO - colour an improvement green, a loss red
+out_table = multi_overall_wide_pos %>%
+                              map_stage_codes(stage_list_codes) %>%
+                              map_driver_names(cars) %>% 
+              dplyr::arrange(!!as.symbol(stage_codes[length(stage_codes)]))  %>%
+              select(-entryId) %>% head(10)
+```
+
+
+
+```{r}
+overall_rebase_code = out_table$code[1]
+  
+multi_overall_wide_gap_top10 = multi_overall_wide_gap %>%
+                              map_driver_names(cars) %>%
+                              rebase(overall_rebase_code,
+                                     stage_list_codes, id_col='code') %>%
+                              map_stage_codes(stage_list_codes) %>%
+        dplyr::arrange(!!as.symbol(stage_codes[length(stage_codes)]), na.last=TRUE) %>%
+      # TO DO - filter on entryID NOT code - du0licates etc NEU
+      # Hackfix limit on top 20 for pool for now...
+      head(20) %>%
+      filter(code %in% out_table$code) 
+                      #head(10)
+```
+
+
+
+
+```{r}
+gt_stage_pos_plots = list()
+multi_stage_long_pos = multi_stage_wide_pos %>%
+                              pivot_longer(c(all_of(stage_codes)),
+                                           names_to ="Stage",
+                                           values_to ="Pos") %>%
+                          mutate(Stage = factor(Stage,
+                                                levels = stage_codes))
+
+# TO DO - add Overall with coloured background?
+#formattable(multi_stage_wide_pos, align='c',
+#                  list(area(col = stage_codes) ~ highlight_first())) 
+
+```
+
+
+```{r message=FALSE}
+overall_long_gap_top10 <- multi_overall_wide_gap_top10 %>%
+                            # Make relative to current overall leader
+                            # at end of each stage
+                            mutate_at(2:ncol(multi_overall_wide_gap_top10),
+                                      list(~ . + abs(min(., na.rm=TRUE)))) %>% 
+                            gather(key ="Stage",
+                            value ="Gap", all_of(stage_codes)) %>%
+                                group_by(code) %>%
+                                summarize(spk_ = spk_chr(-Gap,
+                                                         type ="bar")) %>%
+                              rename(overall_gap_bar=spk_)
+#spark_df(overall_long_gap_top10)
+```
+
+```{r warnining=FALSE}
+# Gap to stage winner
+
+min2 = function(x, na.rm = TRUE) x - min(x, na.rm = na.rm)
+                                  
+# If we are in the group, we need to use diffFirstMs *in group*
+multi_stage_wide_gap = multi_stage_times %>%
+                            mutate(diffFirstS = diffFirstMs/1000) %>%
+                            get_multi_stage_generic_wide(stage_list_codes,
+                                                         'diffFirstS')  %>%
+                            relabel_times_df(stage_list_codes, cars) %>%
+          dplyr::arrange(!!as.symbol(stage_codes[length(stage_codes)])) %>%
+  # calculate within group diff pn the diffFirst
+  mutate_at(stage_codes, min2) %>% 
+  # Hackfix - name  duplicate
+  head(20) %>%
+  filter(code %in% overall_long_gap_top10$code) 
+
+
+#multi_stage_wide_gap
+
+
+multi_stage_long_gap = generate_spark_bar(multi_stage_wide_gap) %>%
+  rename(gap_to_stagewinner_bar=spk_)
+
+#spark_df(multi_stage_long_gap)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# Stage position chart
+#top10_codes = multi_stage_wide_pos$code
+multi_overall_wide_pos_ = multi_overall_wide_pos  %>%
+                            relabel_times_df(stage_list_codes, cars) %>%
+          dplyr::arrange(!!as.symbol(stage_codes[length(stage_codes)])) %>% head(10)
+
+multi_overall_long_pos = multi_overall_wide_pos_ %>%
+                              pivot_longer(c(all_of(stage_codes)),
+                                           names_to ="Stage",
+                                           values_to ="Pos") %>%
+                          mutate(Stage = factor(Stage,
+                                                levels = stage_codes))
+
+top10_codes = multi_overall_wide_pos_$code
+gt_stage_pos_plots = list()
+gt_overall_pos_plots = list()
+# Iterate through each driver in the top 10
+for (c in 1:length(top10_codes)){
+    # Add each plot to the plot list
+    gt_stage_pos_plots[[length(gt_stage_pos_plots) + 1]] <-
+        get_pos_chart(multi_stage_long_pos, top10_codes[c],
+                      embed=T, aspect_ratio=3, size=5)
+    gt_overall_pos_plots[[length(gt_overall_pos_plots) + 1]] <-
+        get_pos_chart(multi_overall_long_pos, top10_codes[c],
+                      embed=T, aspect_ratio=3, size=5)
+}
+
+multi_overall_wide_pos_$stage_poschart = gt_stage_pos_plots
+```
+
+
+```{r warning=FALSE, message=FALSE}
+#position changes
+pos_codes = multi_overall_wide_pos_$code
+
+# This doesn't apply for just SS1
+pos_diffs = multi_overall_wide_pos_ 
+if (length(stage_list) > 1) {
+  pos_diffs = pos_diffs %>% 
+                  select(-code) %>%
+                  coldiffs(all_of(stage_codes),firstcol=0)
+  pos_diffs$code = pos_codes
+  
+  # Reorder the columns by moving last column to first
+  #pos_diffs = pos_diffs %>% select('code', everything())
+}
+
+pos_gains = pos_diffs
+
+pos_gains[,stage_codes] = -pos_gains[,stage_codes]
+
+pos_gain_long_top10 <- pos_gains %>%
+                              head(10) %>%
+                              gather(key ="Stage",
+                                     value ="PosChange",
+                                      all_of(stage_codes))
+
+pos_gain_sparkline_top10 <- pos_gain_long_top10 %>%
+                                group_by(code) %>%
+                                summarize(spk_ = spk_chr(PosChange,
+                                                         type ="bar")) %>%
+                            rename(pos_change_bar=spk_)
+
+#pos_gain_sparkline_top10 %>% spark_df()
+```
+
+```{r}
+multi_overall_wide_pos_$overall_poschart = gt_overall_pos_plots
+```
+
+```{r warning=FALSE }
+# Stage Pace Calculations
+
+stage_range = c(start=stage_codes[1],
+                end=stage_codes[length(stage_codes)])
+
+
+multi_stage_pace = get_multi_stage_pace(multi_stage_times, cars)
+
+# TO DO - we need to rebase to group leader
+# TO DO get_multi_stage_generic_wide() should fail nice w/ empty df
+# WRC sucks with duplicate driver codes...
+# So need to back up and include the driverId
+pace_wide = multi_stage_pace %>% 
+              get_multi_stage_generic_wide(stage_codes, 'pace',
+                                           # Unique group keys required
+                                           # Driver code not guaranteed unique
+                                           group_key=c('code_driver', 'entryId'),
+                                           spread_key='code')
+
+overall_lead_code = multi_overall_wide_pos_[1, 'code']
+
+pace_wide_rebased = rebase(pace_wide, overall_lead_code, stage_codes,
+                           id_col='code_driver')
+
+pace_stage = pace_wide_rebased %>% 
+                gather(code, pace,
+                       stage_range['start']:stage_range['end']) %>%
+                merge(stages[,c('code', 'start_dist', 'cum_dist')],
+                          by='code')
+```
+
+## Rally Sparkline Summary
+
+Simple summary charts of rally progress for each driver, ordered by latest overall ranking:
+
+```{r}
+# Don't display if only a single stage
+if (length(stage_list)>1) {
+  multi_overall_wide_gap_top10['code'] %>%
+    inner_join(multi_overall_wide_pos_[,c('code','overall_poschart')], by = 'code') %>%
+    inner_join(overall_long_gap_top10, by = 'code') %>%  
+      inner_join(pos_gain_sparkline_top10[, c('code','pos_change_bar')], by = 'code') %>%
+   inner_join(multi_overall_wide_pos_[,c('code','stage_poschart')], by = 'code') %>%
+  inner_join(multi_stage_long_gap[, c('code','gap_to_stagewinner_bar')], by = 'code') %>%
+  rename("Overall Pos"=overall_poschart, "Overall Gap"=overall_gap_bar,
+         "Stage Pos"= stage_poschart, "Stage Gap"=gap_to_stagewinner_bar,
+         "Overall Pos Change"=pos_change_bar) %>%
+  spark_df()
+} else cat('Not enough data for a meaningful table...')
+#TO DO - need to be able to pass in a caption to spark_df
+```
+
+
+
+## Off-the-Pace Chart
+
+Overall time deltas at each stage relative to overall leader:
+
+```{r overall-off-the-pace-chart, warning=FALSE, message=FALSE}
+g = multi_overall_wide_gap_top10 %>%
+        pivot_longer(!code, names_to = "Num", values_to = "time") %>%
+        filter(abs(time)<=300 ) %>%
+        mutate(Num = as.integer(str_replace(Num, "SS", ""))) %>%
+        off_the_pace_chart(dist='Num',
+                           t='time',
+                           #label_typ='ggrepel',
+                           code='code', yflip=TRUE)
+
+g + labs(title = paste0("Off-the-pace chart for overall leader"),
+  subtitle = paste0("Time gained / lost over stages, ", rally_name),
+  x="Stage",
+  y="Time delta (s)",
+  caption = "Created by: RallyDataJunkie.com" # eg WRC Rally
+) 
+```
+
+*TO DO - this is misleading. Drivers fall of the pace are dropped the chart but the chart should show the line going off the chart.*
+
+
+## Stage Pace
+
+Stage pace charts rebased to overall leader.
+
+```{r overall-stage-pace-chart, warning=FALSE}
+# Need ylim to make sure all the leaders pace comparisons
+# with lost time are in view
+
+cum_dist = max(pace_stage$cum_dist)
+g_pm = pace_map(pace_stage, label_size=2,
+                pace_label_offset=-0.04) #+ ylim(1.5, -1.5)
+
+
+# Add banner - TO DO  - this generates warnings... Need to tidy up
+g_pm = g_pm  +
+    theme(legend.position="none") + 
+  labs(title = paste0("Pace chart across stages" ),
+  subtitle = paste0("Rebased relative to overall leader (",overall_lead_code,"), ", rally_name),
+  x="Accumulated stage distance (km)",
+  y="Pace delta (s/km)",
+  caption = "Created by: RallyDataJunkie.com"
+
+) 
+
+ypace_limits = layer_scales(g_pm)$y$get_limits()
+ypace_max = abs(ypace_limits[1])
+ypace_min = ifelse((abs(ypace_max) < 1.5), -1.5, -abs(ypace_max))
+
+g_pm + geom_rect(data=pace_stage[pace_stage$code_driver==overall_lead_code,],
+              aes(xmin=0, xmax=max(cum_dist),
+                  ymin = ypace_min-0.2,  ymax = ypace_min-0.4,
+                  alpha=0), fill = 'black') +
+    geom_text(data=pace_stage[pace_stage$code_driver==overall_lead_code,],
+              aes(x=(cum_dist + start_dist)/2, label=code),
+              y=abs(ypace_min-0.3), color='yellow', size=3) +
+    geom_segment(data=pace_stage[pace_stage$code_driver==overall_lead_code,],
+                 aes(x=cum_dist, xend=cum_dist,
+                    y=ypace_min-0.2, yend=ypace_min-0.4), color='yellow') +
+    geom_segment(data=pace_stage[pace_stage$code_driver==overall_lead_code,],
+                 aes(x=cum_dist, xend=cum_dist,
+                    y=ypace_max, yend=ypace_min-0.4),
+                 linetype="dotted",
+                 color='lightgrey') + ylim(ypace_max, ypace_min-0.4)
+```
+
+*TO DO - the fastest pace line should have a purple colour.*
+
+
+## Gap to Overall Leader at Each Stage End
+
+The gap to the overall leader at the end of each stage, with table ordered by overall rally position at end of last recorded stage:
+
+```{r}
+#kable(multi_overall_wide_gap_top10)
+# Add min value abs to each column
+multi_overall_wide_gap_top10_view = multi_overall_wide_gap_top10 %>% mutate_at(2:ncol(multi_overall_wide_gap_top10), list(~ . + abs(min(., na.rm=TRUE))))
+
+kable(multi_overall_wide_gap_top10_view, format = "html") %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+
+
+## Stage Wins Summary
+
+Summary of stage wins.
+
+```{r warning=FALSE, message=FALSE}
+# Count number of stage wins by driver
+# If we have a tie then the pos is still ranked so rerank based on delta
+multi_stage_wide_gap %>% 
+  pivot_longer(!code, names_to = "Stage", values_to = "Delta") %>% filter(Delta==0) %>% select(c('code', 'Stage')) %>%
+group_by(code) %>%  summarise(wins = toString(Stage), wincount=n()) %>% arrange(desc(wincount)) %>% formattable(align='c')
+
+```
+
+
+## Penalties
+
+```{r}
+controls = get_controls(sections)
+
+map_controlId = function(df, controls){
+  df %>%
+    merge(controls[,c('controlId', 'code', 'location', 'type')],
+          by='controlId', suffixes=c('', '2'))  %>%
+    rename(control = code2)
+}
+
+
+penalties = get_penalties(eventId)
+
+if (length(penalties)>0) {
+  penalties = penalties %>%
+    filter(entryId %in% wrc_entries)  %>% map_driver_names(cars) %>%
+    map_controlId(controls) %>%
+    mutate('penaltyDurationS' = penaltyDurationMs/1000 ) %>%
+      # Limit columns and set column order
+      select(-c(controlId, penaltyDurationMs, penaltyDurationMs,
+                penaltyId, entryId)) %>%
+      # Move last column to first
+      select(code, control, location, type, reason, 'penaltyDurationS')
+  
+  penalties %>%
+    formattable(caption=paste("Penalties", rally_name, sep=", "))
+   # select(code, penaltyDuration, reason)
+}
+```
+
+## Retirements
+
+```{r}
+retirements = get_retirements(eventId)
+
+if (length(retirements>0)) {
+  retirements %>%
+  filter(entryId %in% wrc_entries)  %>% map_driver_names(cars) %>%
+  map_controlId(controls) %>% 
+  rename(time=retirementDateTime) %>%
+  select(-c(controlId, retirementId, retirementDateTimeLocal, entryId)) %>%
+  relocate(reason, .after = last_col()) %>%
+  formattable(caption=paste("Retirements", rally_name, sep=", "))
+}
+
+```
+
+
+## Stage Position History
+
+*Ranked according to position on last recorded stage __not__ overall position. The advantage of this ordering is that it helps register "surprise" arising from a perhaps unexpected stage winner. The chart gives the summary of stage rank evolution.*
+
+*Note that the stage position is based on the positions given by WRC Live Timing. If two drivers record the same time (or at least, same time to a tenth of a second), only one of them will have position==1 and the other will be position==2. A different "first" truth can be generated by testing on gap==0.0.*
+
+```{r}
+# Order according to overall
+overall_order = multi_overall_wide_pos_$code
+kable(multi_stage_wide_pos %>% dplyr::arrange(factor(code, levels = overall_order)), format = "html") %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+
+
+## Stage Times
+
+Summary of raw stage times
+
+```{r}
+#kable(multi_stage_times_wide)
+kable(multi_stage_times_wide %>%
+        dplyr::arrange(factor(code, levels = overall_order)) %>%
+        select(-entryId), format = "html")  %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+
+## Stage Time Deltas
+
+Summary of stage time deltas (*gap* to stage winner in seconds):
+
+```{r}
+#kable(multi_stage_times_wide)
+multi_stage_win_gap_ordered = multi_stage_wide_gap %>%
+        dplyr::arrange(factor(code, levels = overall_order))  %>%
+        select(-entryId)
+
+kable(multi_stage_win_gap_ordered, format = "html")  %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+
+## Stage Win Truth
+
+Originally developed to support the automated text summary production, the *stage win truth* table provides a glanceable view summarising the stage winner on each stage:
+
+```{r}
+#ifelse(is.na(x), FALSE, x)
+isStageWin = function(x) ifelse(is.na(x), FALSE, x==0)
+
+multi_stage_win_truth = multi_stage_win_gap_ordered %>%
+                          mutate(across(stage_codes, isStageWin))
+
+multi_stage_win_truth
+```
+
+## Overall Position
+
+Evolution of overall position:
+
+```{r}
+#formattable(out_table,
+#            align='c',
+#                  list(area(col = stage_codes) ~ highlight_first()))
+#kable(out_table)
+kable(out_table, format = "html") %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+
+## Overall Lead Truth
+
+Originally produced to support text summary generation, the *overall lead truth* tables  provide glanceable views over how the overal lead developed over each stage.
+
+Truth tables include glanceable reviews of the overall leader, as well as overall lead gains, losses and retention.
+
+Overall lead truth (based on gap to leader of 0s to capture joint stage times at the level of tenths of a second):
+
+```{r}
+#ifelse(is.na(x), FALSE, x)
+isLead = function(x) ifelse(is.na(x), FALSE, x==1)
+pos_delta = function(curr, prev) {
+  #Positive is improvement, negative is loss 
+  prev-curr
+}
+out_table %>% mutate(across(stage_codes, isLead))
+```
+
+
+
+```{r}
+last_stage_code = stage_codes[length(stage_codes)]
+
+multi_overall_lead_previous_long = out_table %>% pivot_longer(cols = -c(code), names_to = "stage", values_to = "position")  %>%
+  group_by(code) %>%
+  mutate(prev_position = lag(position, order_by=code),
+         retained_lead=isLead(position) & isLead(prev_position),
+         lost_lead=!isLead(position) & isLead(prev_position),
+         gained_lead=isLead(position) & !isLead(prev_position))
+
+multi_overall_lead_previous_long = multi_overall_lead_previous_long %>%
+                mutate(overall_position_delta=pos_delta(position, prev_position))  %>%
+ group_by(stage) %>%
+ mutate(overall_chase_code = lead(code, order_by=position),
+        overall_lead_code = lag(code, order_by=position))
+```
+
+Overall position in previous stage:
+
+```{r}
+multi_overall_lead_previous_wide = multi_overall_lead_previous_long %>%
+  pivot_wider(id_cols=c(code), names_from=stage, values_from=prev_position)
+multi_overall_lead_previous_wide
+```
+
+Retained overall lead:
+
+```{r}
+multi_overall_lead_retained_wide = multi_overall_lead_previous_long %>%
+  pivot_wider(id_cols=c(code), names_from=stage,
+              values_from=retained_lead)
+
+multi_overall_lead_retained_wide
+```
+
+Lost overall lead:
+
+```{r}
+multi_overall_lead_lost_wide = multi_overall_lead_previous_long %>%
+  pivot_wider(id_cols=c(code), names_from=stage,
+              values_from=lost_lead)
+
+multi_overall_lead_lost_wide
+```
+
+Gained overall lead:
+
+```{r}
+multi_overall_lead_gained_wide = multi_overall_lead_previous_long %>%
+  pivot_wider(id_cols=c(code), names_from=stage,
+              values_from=gained_lead)
+
+multi_overall_lead_gained_wide
+```
+Stage winner gained overall lead
+
+```{r}
+tmp_truth = data.frame((multi_stage_win_truth %>% select(!code)) & multi_overall_lead_gained_wide %>% select(!code))
+
+multi_overall_stagewin_lead_gained_wide = multi_stage_win_truth %>%
+  select(code)%>%  cbind(tmp_truth)
+
+multi_overall_stagewin_lead_gained_wide
+```
+
+## Gap to the Driver in Overall Lead at Each Stage End
+
+The gap to current overall leader, `r overall_lead_code`, with table ordered by overall rally position at end of last recorded stage:
+
+```{r}
+#kable(multi_overall_wide_gap_top10)
+kable(multi_overall_wide_gap_top10, format = "html") %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+
+## Text report
+
+```{r message=FALSE, results='hide'}
+library(reticulate)
+
+py_run_file("rules_processor.py")
+py_run_file("rules_overall.py")
+
+```
+
+```{r}
+overall_reporter_view = multi_overall_lead_previous_long %>% 
+         filter(stage==!!last_stage_code)  %>%
+         merge(multi_overall_wide_gap_top10_view %>% 
+                select(code, !!last_stage_code) %>%
+                rename(overall_gap=!!last_stage_code), by='code')  %>%
+         merge(multi_stage_wide_pos %>% 
+                select(code, !!last_stage_code) %>%
+                rename(stage_position=!!last_stage_code), by='code')  %>%
+         merge(multi_stage_win_truth %>% 
+                select(code, !!last_stage_code) %>%
+                rename(stage_win=!!last_stage_code), by='code') %>% 
+         rename(overall_pos = position) %>%
+         dplyr::arrange(overall_pos) %>%
+         mutate(overall_diff=overall_gap-lag(overall_gap),
+                overall_chase=lead(overall_gap)-overall_gap) %>%
+        mutate(stagenum = str_extract(stage,"\\d+"))
+
+if (length(penalties)>0)
+   overall_reporter_view = overall_reporter_view %>% 
+        left_join(penalties %>% mutate(stagenum = str_extract(control,"\\d+")), by=c('stagenum', 'code'))
+
+# TO DO - it would be useful to have the gap/diff change from each stage 
+# Also, whether the person ahead or behind is in the same position
+
+kable(overall_reporter_view, format = "html") %>%
+  kable_styling() %>%
+  kableExtra::scroll_box(width = "100%")
+```
+```{r message=FALSE, results='hide'}
+src = knit_expand("rule_template_overall.Rmd")
+knit_child(text=src,
+               options = list(echo=FALSE,results='hide', warning=FALSE, error=FALSE),
+               quiet=TRUE)
+```
+
+__Overall rally report at end of `r last_stage_code`:__
+
+```{r results="asis"}
+cat(py$txt_out)
+```
+
+```{r results="asis"}
+#if ("NEU" %in% names(py$overall_txts))
+#  cat(paste('NEU: ',py$overall_txts[["NEU"]]))
+```

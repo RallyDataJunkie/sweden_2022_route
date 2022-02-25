@@ -1,0 +1,336 @@
+```{r}
+cat(paste("test-template IN: ",stage_code),
+    file=logFile, append=TRUE, sep = "\n")
+```
+
+## Stage `r stage_code` Splits Analysis
+
+Reports on splits
+
+```{r fsd-{{result_group}}-{{stage_code}}, cache=TRUE, results=FALSE, message=FALSE, warning=FALSE}
+#library(formattable)
+
+#stage_code = 'SS6'
+#stageId = stage_list_codes[1]
+
+splits = get_splits(eventId, stageId)
+
+splits_locations = splits$splitPoints %>% arrange(number)
+splits_list = splits_locations$splitPointId
+splits_locations$splitname = sapply(splits_locations$splitPointId,
+                                 get_split_label)
+
+split_names = splits_locations$splitname
+split_cols = get_split_cols(splits)
+split_names = c(split_names, 'split_N')
+
+# Split distances
+splits_locations$start_dist = lag(splits_locations$distance,
+                                  default=0)
+
+splits_locations$section_dist = c(splits_locations$distance[1],
+                                  diff(splits_locations$distance))
+split_distances = splits_locations$section_dist
+
+stage_dist = stages[stages['stageId']==stageId,'distance']
+full_split_distances = c(split_distances, stage_dist-sum(split_distances))
+# Label distances using split names
+names(full_split_distances) = split_names
+full_split_distances_df = full_split_distances %>%
+                              as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+                              mutate(distance=cumsum(full_split_distances)) %>%
+ select(c(rowname, distance)) %>% rename(splitname=rowname)
+```
+
+```{r fsw--{{result_group}}-{{stage_code}}, cache=TRUE, echo=FALSE, message=FALSE, warning=FALSE,}
+full_splits_wide = get_splits_wide(splits, wrc_entries) %>%
+                      widen_splits_stage_times(stage_times) %>%
+                      filter(entryId %in% wrc_entries) %>%
+                      map_split_codes(splits_list) %>% 
+                      map_driver_names(cars)  %>%
+                      arrange(position)
+
+if (use_group_rank) {
+  group_rebase_id = full_splits_wide$code[1]
+  full_splits_wide = full_splits_wide %>%
+                            rebase(group_rebase_id, 'diffFirstMs', 
+                                   id_col='code')
+}
+
+
+#save_data(full_splits_wide, paste0("full_splits_wide", stage_code, ".csv"))
+
+#kable(full_splits_wide)
+```
+
+
+```{r}
+# Filter out any driver with an excessive delta
+#https://dplyr.tidyverse.org/reference/filter_all.html
+#filter_at(vars(starts_with("split_")),
+#          all_vars(abs(.) <20))
+
+# TO DO - would it make more sense to cutoff from a large gap?
+if (!(exists("cutoff_delta"))) cutoff_delta = 30000
+if (cutoff_delta>0)
+  full_splits_wide = full_splits_wide %>%
+                        filter(diffFirstMs<cutoff_delta)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+full_durations_wide = get_split_duration(full_splits_wide,
+                                          split_names, id_col='code')
+
+# Pace
+section_pace_wide = full_durations_wide
+
+for (s in split_names) {
+  section_pace_wide[,s] = section_pace_wide[,s] / full_split_distances[s]
+}
+
+#save_data(full_durations_wide, paste0("full_durations_wide", stage_code, ".csv"))
+```
+
+### Split Locations
+
+Length of each split section in km:
+
+```{r}
+dist_df = data.frame(full_split_distances) %>% 
+              mutate(stage_dist = cumsum(full_split_distances))
+
+#save_data(dist_df, paste0("split_distances", stage_code, ".csv"))
+kable(dist_df)
+```
+
+
+### Stage Split Times & Result
+
+Summary of stage split times and overall stage result:
+
+```{r}
+stage_split_results = full_splits_wide %>% 
+                  mutate(diffFirstS=diffFirstMs/1000) %>% 
+                  select(c(code,  all_of(split_names),
+                         diffFirstS, position)) %>% 
+                  arrange(position)
+
+kable(stage_split_results)
+```
+
+### Split Time Rankings
+
+Rank of each split time:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+split_ranks = get_split_rank(full_splits_wide, split_names) %>%
+                select(code, all_of(split_names) ) %>%
+                filter_at(vars(starts_with("split_")),
+                                all_vars(! is.na(.)))
+
+split_N_col_idx = which(colnames(split_ranks) == 'split_N')[[1]]
+
+caption = paste0(stage_info_$code, ' split time rank')
+
+formattable(split_ranks, align='c',
+            list(area(col = 2:split_N_col_idx) ~ color_tile2(c("red",'white', "forestgreen")),
+                 entryId=FALSE), caption=caption)
+```
+
+Rank on each split section:
+
+```{r}
+split_duration_ranks = get_split_rank(full_durations_wide, split_names)
+
+caption = paste0(stage_info_$code, ' split section rank')
+formattable(split_duration_ranks, align='c',
+            list(area(col = 2:split_N_col_idx) ~ color_tile2(c("red",'white', "forestgreen")),
+                 entryId=FALSE), caption=caption)
+```
+
+### Split Section Pace
+
+Pace is measured in seconds per kilometer, which is to say, how long it takes to complete each kilometer (*lower is better*):
+
+```{r}
+kable(section_pace_wide %>% mutate_if(is.numeric, round, digits = 2) )
+```
+
+### Pace Chart
+
+Pace relative to the stage winner.
+
+```{r test-pace-chart-{{result_group}}-{{stage_code}}, cache=TRUE}
+stage_winner_code = section_pace_wide[1,]$code
+full_split_distances_df = full_split_distances_df %>% 
+                            mutate(start_dist =lag(distance, default=0))
+
+section_pace_wide_rebased = rebase(section_pace_wide, stage_winner_code,
+                                   split_names, id_col='code')
+
+
+section_pace_long_rebased = section_pace_wide_rebased %>% 
+                  head(10) %>%
+                gather(splitname, pace,
+                       as.character(split_names)) %>%
+                merge(full_split_distances_df[,c('splitname',
+                                          'start_dist', 'distance')],
+                      by='splitname')
+
+section_pace_long_rebased %>%
+    pace_map( xstart='start_dist', id_col='code',
+         xend='distance', lines=FALSE, label_dodge=2,
+         label_size=2) + xlab("Accumulated stage distance (km)") + ylim(1.5, -1.5) + labs(title = paste0("Pace chart over splits, ", stage_code),
+  subtitle = paste0("Rebased relative to stage winner (",stage_winner_code,"), ", rally_name),
+  x="Distance into stage (km)",
+  y="Pace delta (s/km)",
+  caption = "Created by: RallyDataJunkie.com" ) 
+                
+```
+
+### Ultimate Stage Comparisons
+
+Split time comparisons relative to various ultimate stage time calculations.
+
+These views provide various ways of comparing the performance of each driver to various ghost drivers:
+
+- best recorded split time at each split (*ultimate actuals*): gives an estimate of how well the driver's split times compare with each first ranked split time (time into stage at each split);
+- fastest time going from one split to the next (*ultimate sections*): gives an estimate of how quickly each driver completed each split section relative to the quickest time recorded completing that split section (time taken to go from one split point to the next);
+- *accumulated ultimate sections* times: gives and estimate of how quickly the driver is going relative to the fastest possible completion of the stage based on accumulated ultimate split section times.
+
+```{r test-ults-{{result_group}}-{{stage_code}}, cache=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+ultimate_splits_long = full_durations_wide %>%
+                     pivot_longer(all_of(split_names),
+                                  names_to = "splitname",
+                                  values_to = "sectionDurationS") %>%
+                     select(splitname, sectionDurationS) %>%
+                     # Defensive measure
+                     #filter(!is.na(sectionDurationS) & sectionDurationS>0) %>%
+                     group_by(splitname) %>% 
+                     summarise(ultimate = min(sectionDurationS,
+                                              na.rm = TRUE)) %>%
+                     mutate(ultimateElapsed = cumsum(ultimate))
+
+ultimate_wide_durations = ultimate_splits_long %>% 
+                  select(splitname, ultimate) %>%
+                  pivot_wider(names_from = splitname,
+                              values_from = ultimate) %>%
+                  mutate(code='ultimate')
+
+ultimate_between_split = full_durations_wide %>%
+                            select(code, all_of(split_names)) %>% 
+                            bind_rows(ultimate_wide_durations) %>%
+                            rebase('ultimate', split_names,
+                                   id_col='code')
+
+ultimate_wide_elapsed = ultimate_widen(ultimate_splits_long,
+                                       'ultimateElapsed', 'ultimate')
+
+ultimate_accumulated = full_splits_wide %>% 
+                          ultimate_rebaser(ultimate_wide_elapsed,
+                                         split_names, 'ultimate')
+
+actual_ultimate = full_splits_wide %>% 
+                      select(code, all_of(split_names)) %>% 
+                      # Make long
+                      select(all_of(as.character(split_names)),
+                             code) %>%
+                      pivot_longer(as.character(split_names),
+                                   names_to = "splitname",
+                                   values_to = "sectionDurationS") %>%
+                      group_by(splitname) %>%
+                      summarise(actualUltimate = min(sectionDurationS,
+                                                     na.rm=TRUE))
+
+ultimate_splits_long$actual = actual_ultimate$actualUltimate
+ultimate_wide_actual = ultimate_widen(ultimate_splits_long,
+                                      'actual',
+                                      'ultimate')
+ultimate_actual = full_splits_wide %>% 
+                      ultimate_rebaser(ultimate_wide_actual,
+                                       split_names, 'ultimate')
+
+```
+
+#### Ultimate Actuals
+
+Driver times compared to the first ranked recorded split time at each split:
+
+```{r ult-act-table-{{result_group}}-{{stage_code}}, cache=TRUE}
+caption = paste0(stage_info_$code, ' ultimate split actual deltas')
+ultimate_actual %>%
+                  filter_at(vars(starts_with("split_")),
+                                all_vars(! is.na(.)))  %>%
+        mutate_if(is.numeric, round, digits = 1) %>%
+formattable( align='c',
+            list(area(col = 2:split_N_col_idx) ~ color_tile2(c("red",'white', "forestgreen")),
+                 entryId=FALSE), caption=caption)
+```
+
+
+#### Ultimate Sections
+
+Split durations rebased relative to the fastest transit of each split section:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+caption = paste0(stage_info_$code, ' ultimate section deltas')
+ultimate_between_split %>%
+                  filter_at(vars(starts_with("split_")),
+                                all_vars(! is.na(.)))   %>%
+      mutate_if(is.numeric, round, digits = 1) %>%
+formattable(align='c',
+            list(area(col = 2:split_N_col_idx) ~ color_tile2(c("red",'white',"forestgreen")),
+                 entryId=FALSE), caption=caption)
+```
+
+
+#### Ultimate Accumulated Sections
+
+Actual split times relative to the accumulated ultimate split section times:
+
+```{r test-uas-t-{{result_group}}-{{stage_code}}, cache=TRUE,}
+caption = paste0(stage_info_$code, ' accumulated ultimate section deltas')
+ultimate_accumulated %>%
+                  filter_at(vars(starts_with("split_")),
+                                all_vars(! is.na(.)))  %>%
+        mutate_if(is.numeric, round, digits = 1) %>%
+formattable( align='c',
+            list(area(col = 2:split_N_col_idx) ~ color_tile2(c("red",'white', "forestgreen")),
+                 entryId=FALSE), caption=caption)
+```
+
+### Split Section Pace Distribution
+
+Distribution of pace values for each split section:
+
+```{r test-split-pace-chart-{{result_group}}-{{stage_code}}, cache=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+full_split_dists = map_df(full_split_distances, ~as.data.frame(.x), .id="splitname") %>% rename(section_distance = .x) %>% 
+  mutate(distance = cumsum(section_distance))
+#Pace calculation
+section_pace_long = section_pace_wide %>% 
+                  head(10) %>%
+                gather(splitname, pace, split_names) %>%
+                #merge(splits_locations[,c('splitname',
+                #                          'start_dist', 'distance')],
+                merge(full_split_dists,
+                          by='splitname')
+
+# TO DO start_dist as a lag...
+# TO DO - the pace limit should be better set?
+#ggplot(section_pace_long[section_pace_long$pace<40,],
+ggplot(section_pace_long,
+       aes(x=distance, y=pace)) +
+    geom_boxplot(aes(group=distance)) +theme_bw() +
+labs(title = paste0(stage_code, ": pace on each split"),
+  subtitle = paste0("Boxplot depicting median and inter-quartile range, ", rally_name),
+  x="Split distance into stage (km)",
+  y="Pace (s/km)",
+  caption = "Created by: RallyDataJunkie.com" )
+```
+
+```{r}
+cat(paste("test-template OUT: ",stage_code),
+    file=logFile, append=TRUE, sep = "\n")
+```

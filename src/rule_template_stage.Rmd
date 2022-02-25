@@ -1,0 +1,16 @@
+```{python txt-stage-report-{{stage_code}} }
+#, cache=TRUE
+from numpy import inf
+
+#pd_df = r.top10_stage_times
+pd_df = r.stage_reporter_view
+#pd_df = r.top10_stage_times
+#pd_df.head()
+#pd_df['overall_stage_pos'] # Possibly a str containing 'NA'?
+#pd_df.fillna(9999, inplace=True)
+pd_df.dropna(how='any', subset=['overall_stage_pos', 'TimeInS', 'gap', 'diff'], inplace=True)
+txts=[]
+stage_txts = {}
+pd_df.apply(rulesbyrow, ruleset='rule_multi_stage', axis=1)
+txt_out = '\n\n'.join(txts)
+```

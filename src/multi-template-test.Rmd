@@ -1,0 +1,209 @@
+
+```{r setup, warning=FALSE, include=FALSE, echo=FALSE, message=FALSE, output=FALSE}
+library(knitr)
+library(kableExtra)
+library(formattable)
+
+source('_code/wrc-api.R')
+source('_code/wrc-wrangling.R')
+source('_code/wrc-charts.R')
+source('timing_sketches.R')
+```
+
+```{r setup_logger, echo=FALSE}
+logFile = file("build.log", 'w') 
+cat("Starting build", file=logFile, sep='\n')
+```
+
+```{r init_vars, warning=FALSE, include=FALSE, echo=FALSE, message=FALSE, output=FALSE}
+# Load in event data (moved to index.Rmd)
+#s = get_active_season()
+#eventId = get_eventId_from_name(s, 'italia')
+#rally_name = paste0(s[s$id==eventId,'name'], ", 2021")
+
+itinerary = get_itinerary(eventId)
+sections = get_sections(itinerary)
+controls = get_controls(sections)
+
+stages = get_stages(sections) #status and code are useful...
+
+stages$cum_dist = cumsum(stages$distance)
+stages$start_dist = c(0, stages$cum_dist[-length(stages$cum_dist)])
+
+
+stages_lookup = get_stages_lookup(stages)
+
+stage_cols = c('stageId', 'number', 'name', 'distance', 'code')
+stage_info = stages %>%
+                select(all_of(stage_cols)) %>%
+                # Tidy up the stage name
+                mutate(name = str_replace(name, ' \\(Live TV\\)', ''))
+  
+# For driver details
+entries = get_rally_entries(eventId)
+cars = get_car_data(entries)
+
+# We can have customer entries which mess things up...
+# TO DO - need to look this up properly
+
+class_WRC_exclusions = c("C. FERAUD", "L. BERTELLI",
+                         "J. SERDERIDIS")
+class_WRC = cars %>% filter(groupname=='Rally1')  %>% 
+                filter(!(drivername %in% class_WRC_exclusions)) %>% 
+                select(entryId) 
+
+
+class_WRC2 = cars %>% 
+                  filter(startsWith(eligibility, 'WRC2')) %>%
+                  select(entryId)
+
+class_JWRC = cars %>% filter(eligibility=='JWRC') %>% select(entryId)
+
+class_WRC3 = cars %>% filter(eligibility=='WRC3') %>% select(entryId)
+
+#wrc = cars %>% filter(entryId<=22519)
+
+result_group = 'WRC'
+
+if (result_group == 'WRC') {
+  target_class = class_WRC
+} else if (result_group == 'WRC2') {
+  target_class = class_WRC2
+} else if (result_group == 'WRC3') {
+  target_class = class_WRC3  
+} else if (result_group == 'JWRC') {
+  target_class = class_JWRC
+} else target_class = class_WRC
+
+use_group_rank = TRUE
+
+wrc = cars %>% filter(entryId %in% target_class$entryId)
+wrc_entries = wrc$entryId
+```
+
+```{r save_metadata, echo=FALSE}
+save_data = function(df, fn, dirpath = "results_data/") {
+  if (!dir.exists(dirpath))
+      dir.create(dirpath, recursive=TRUE)
+
+  write.csv(df, file.path(dirpath, fn), row.names = FALSE)
+}
+
+#save_data(cars, "cars.csv")
+#save_data(controls, "controls.csv")
+#save_data(entries %>% select(-eventClasses, -tags), "entries.csv")
+#save_data(stage_info, "stage_info.csv")
+#save_data(stages, "stages.csv")
+#save_data(wrc, "wrc.csv")
+```
+
+```{r done_setup, echo=FALSE}
+cat("Done setup", file=logFile, sep='\n')
+```
+
+# Overall Standings {-}
+
+*Summary reports of overall standings and stage results.*
+
+```{r main_overall_report, message=FALSE, echo=FALSE, error=FALSE, warning=FALSE, results='asis'}
+#stage_list=list("SS1", "SS2", "SS3", "SS4", "SS5", "SS6", "SS7", "SS8", "SS9", "SS10", "SS11", "SS12", "SS13", "SS14", "SS15", "SS16", "SS17", "SS18", "SS19", "SS20")
+#stage_list=list("SS1", "SS2", "SS3", "SS4", "SS5", "SS6", "SS7", "SS8", "SS9","SS10", "SS11", "SS12", "SS13", "SS14", "SS15", "SS16", "SS17", "SS18", "SS19")
+stage_list=list("SS1", "SS2", "SS3", "SS4", "SS5", "SS6", "SS7" )
+
+stage_codes =  unlist(stage_list)
+last_stage_code = stage_codes[length(stage_codes)]
+
+# Just in case
+stage_list = unique(stage_list)
+
+omit_stage_splits = c()
+
+cutoff_delta = -1 #1500000 # if negative ignore
+
+src = knit_expand("overall-template.Rmd")
+cat(knit_child(text=src,
+               options = list(echo=FALSE, warning=FALSE, error=FALSE),
+               quiet=TRUE))
+```
+
+# Overall Driver Reports {-}
+
+Summary reports over all completed stages, rebased to each driver.
+
+```{r looper_overall_driver, message=FALSE, echo=FALSE,error=FALSE, warning=FALSE, results='asis'}
+for (driverEntryId in wrc_entries){
+    #driverEntryId=22431
+    driverCode = cars[cars$entryId==driverEntryId, 'code']
+    
+    # Remove accents for use in chunk labels/image names
+    driverCodeClean = stringi::stri_trans_general(driverCode, "Latin-ASCII")
+    
+    template = "driver_overall_template.Rmd"
+    #template="empty_template.Rmd"
+    src = knit_expand(template)
+    cat(knit_child(text=src,
+                     options = list(echo=FALSE, warning=FALSE, error=FALSE),
+                     quiet=TRUE))
+    
+  }
+```
+
+# Loop Reports {-}
+
+*Forthcoming... summary reports for each loop.*
+
+```{r echo=FALSE}
+#Folded text example: https://stackoverflow.com/a/53812694/454773
+```
+<style>
+.fold-btn { 
+  float: right; 
+  margin: 5px 5px 0 0;
+}
+.fold { 
+  border: 1px solid black;
+  min-height: 40px;
+}
+</style>
+
+<script type="text/javascript">
+$(document).ready(function() {
+  $folds = $(".fold");
+  $folds.wrapInner("<div class=\"fold-blck\">"); // wrap a div container around content
+  $folds.prepend("<button class=\"fold-btn\">Unfold</button>");  // add a button
+  $(".fold-blck").toggle();  // fold all blocks
+  $(".fold-btn").on("click", function() {  // add onClick event
+    $(this).text($(this).text() === "Fold" ? "Unfold" : "Fold");  // if the text equals "Fold", change it to "Unfold"or else to "Fold" 
+    $(this).next(".fold-blck").toggle("linear");  // "swing" is the default easing function. This can be further customized in its speed or the overall animation itself.
+  })
+});
+</script>
+
+<div class="fold">
+Loop reports will provide summaries and views over stage results on a *per loop* basis.
+</div>
+
+```{r looper, message=FALSE, echo=FALSE, error=FALSE, warning=FALSE, results='asis'}
+
+#stage_list=list("SS1","SS2")
+for (stage_code in stage_list){
+  stageId = stages_lookup[[stage_code]]
+  stage_times = get_stage_times(eventId, stageId)
+
+  stage_info_ = stage_info[stage_info['stageId']==stageId,]
+ 
+  src = knit_expand("stage_result_template.Rmd")
+  cat(knit_child(text=src,
+                 options = list(echo=FALSE, warning=FALSE, error=FALSE),
+                 quiet=TRUE))
+}
+```
+
+```{r persist_data_multi_overall, echo=FALSE}
+#save_data(multi_overall_results, "multi_overall_results.csv")
+#save_data(multi_stage_times, "multi_stage_times.csv")
+```
+
+```{r end_logger, echo=FALSE}
+cat("Finished build", file=logFile, sep='\n')
+```

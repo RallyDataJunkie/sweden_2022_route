@@ -1,0 +1,69 @@
+# Rally Overview
+
+## Day
+
+### Startlist
+
+### Section
+
+*Section itinerary*
+
+```{r}
+
+itinerary = get_itinerary(eventId)
+
+itinerary
+
+# Includes startlistId by day
+```
+
+```{r}
+# This defines things like loops
+# So we need to iterate around this for each section = 
+cols_itinerary = c('itineraryLegId', 'name', 'order', 'startListId')
+sections = get_sections(itinerary) %>% merge(itinerary[,cols_itinerary],
+                                             by='itineraryLegId', suffix=c('.section','.i'))
+sections
+```
+
+```{r}
+
+sections[sections['order.section']==1,]
+```
+
+```{r}
+stages = get_stages(sections)
+
+# name, code, stageType, distance, name, number, stageId, eventId, itinerarySectionId
+stages
+```
+
+
+
+```{r}
+
+# Create a denormalised table of info about controls
+
+# Use the table as the basis for individual reports
+
+controls = get_controls(sections)
+
+#itinerarySectionId controlId eventId stageId
+
+controls2 = controls %>% merge(sections[,c('itinerarySectionId',"order.section","name.section" ,"name.i","order.i","startListId" )], suffixes=c(".c.",".sections")) %>% merge(stages[,c('code', 'stageType', 'distance')], by='code', suffixes=c(".c",".stages"), 
+all.x=TRUE)
+controls2 %>%
+  #select(c('code','location', 'distance', 'firstCarDueDateTime', 'firstCarDueDateTimeLocal', 'order', 'name'))) %>%
+   head(2) %>%
+  kable() 
+
+```
+
+```{r}
+
+controls2 %>%
+  select(c('code','type', 'location' ,'order.section',
+           'name.section','name.i',	'order.i','stageType','distance.stages', 'firstCarDueDateTime', 'firstCarDueDateTimeLocal')) %>%
+  arrange(order.i,order.section) %>% 
+  kable()
+```
