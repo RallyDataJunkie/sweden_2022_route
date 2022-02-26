@@ -274,4 +274,26 @@ Leave driver_template 24815
 Enter driver_template 24816
 Leave driver_template 24816
 Leave stage_result_template SS12
+Enter stage_result_template SS14
+test-template IN:  SS14
+test-template OUT:  SS14
+Enter driver_template 24807
+Leave driver_template 24807
+Enter driver_template 24809
+Leave driver_template 24809
+Enter driver_template 24810
+Leave driver_template 24810
+Enter driver_template 24811
+Leave driver_template 24811
+Enter driver_template 24812
+Leave driver_template 24812
+Enter driver_template 24813
+Leave driver_template 24813
+Enter driver_template 24814
+Leave driver_template 24814
+Enter driver_template 24815
+Leave driver_template 24815
+Enter driver_template 24816
+Leave driver_template 24816
+Leave stage_result_template SS14
 Finished build
